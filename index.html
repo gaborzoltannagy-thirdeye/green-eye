@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="hu">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Zöld Szem – A Kígyó Istensége</title>
+<title>Green Eye – The Serpent God</title>
 <style>
   body { margin:0; background:#000; color:#8f8; font-family:monospace;
          display:flex; flex-direction:column; align-items:center; }
@@ -12,30 +12,29 @@
 </style>
 </head>
 <body>
-<h1>👁️ ZÖLD SZEM – A Kígyó Istensége 🐍</h1>
+<h1>👁️ GREEN EYE – The Serpent God 🐍</h1>
 <canvas id="c" width="800" height="500"></canvas>
-<div id="info">WASD / nyilak: mozgás &nbsp;|&nbsp; Egér vagy ← →: fordulás &nbsp;|&nbsp; SPACE: támadás &nbsp;|&nbsp; E: interakció</div>
+<div id="info">WASD / arrows: move | ← →: turn | SPACE: attack | E: interact</div>
 
 <script>
-// ==================== KÉPEK BETÖLTÉSE ====================
-// Ha egy kép nincs meg, a rajzolóhelyettesítőt használjuk.
+// ==================== IMAGES (filenames stay as-is) ====================
 const IMG = {};
 const IMGDEFS = {
-  zack:      "img/zack.png",
+  zack: "img/zack.png",
   fertozett_ferfi: "img/fertozett_ferfi.png",
-  fertozett_no:    "img/fertozett_no.png",
-  hullo:     "img/hullo.png",
-  kigyo_szobor: "img/kigyo_szobor.png"
+  fertozett_no: "img/fertozett_no.png",
+  hullo: "img/hullo.png",
+  kigyo_szobor: "img/kigyo_szobor.png",
+  fedlap: "img/fedlap.png",
+  fal: "img/fal.png",
+  padlo: "img/padlo.png"
 };
 for (const k in IMGDEFS) {
-  const im = new Image();
-  im.src = IMGDEFS[k];
-  IMG[k] = im; // ha nem töltődik be, a drawAsset() rajzol helyette
+  const im = new Image(); im.src = IMGDEFS[k]; IMG[k] = im;
 }
-function imgOK(im){ return im.complete && im.naturalWidth > 0; }
+function imgOK(im){ return im && im.complete && im.naturalWidth > 0; }
 
-// ==================== TÉRKÉP ====================
-// 1=fal, 0=üres, S=szobor helye (2-es kód)
+// ==================== MAP ====================
 const MAPS = [
   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
   [1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
@@ -49,149 +48,348 @@ const MAPS = [
   [1,0,0,0,2,0,0,0,0,0,0,1,0,0,0,1],
   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
-const MW = 16, MH = 11, TS = 64; // tile méret
+const MW = 16, MH = 11, TS = 64;
 
-// ==================== JÁTÉKÁLLAPOT ====================
-let state = "menu"; // menu | jatek | halal | gyozelem
-let player = { x: 1.5*TS, y: 1.5*TS, a: 0, hp: 100, seb: 0 };
-let ellensegek = [];
-let uzenet = "";
-let uzenetIdo = 0;
-let keys = {};
-let attackCd = 0;
+// ==================== STATE ====================
+let state = "title"; // title → menu → game → death/victory
+let player = { x:1.5*TS, y:1.5*TS, a:0, hp:100 };
+let enemies = [];
+let message = "", messageTime = 0, keys = {}, attackCd = 0;
 
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
 
-function uzen(ki, ms=2500){ uzenet = ki; uzenetIdo = performance.now()+ms; }
+function showMsg(text, ms=2500){ message = text; messageTime = performance.now()+ms; }
 
-// ==================== ELLENSÉGEK ====================
-function spawnEllenseg(tipus, tx, ty){
-  const e = { tipus, x: tx*TS+TS/2, y: ty*TS+TS/2, hp: 3, seb: 10, speed: 0.8, ghoul: Math.random()<0.5 };
-  if (tipus === "hullo"){ e.hp = 6; e.seb = 20; e.speed = 1.3; }
-  ellensegek.push(e);
+// ==================== ENEMIES ====================
+function spawnEnemy(type, tx, ty){
+  const e = { type, x:tx*TS+TS/2, y:ty*TS+TS/2, hp:3, dmg:10, speed:0.8,
+              ghoul: Math.random()<0.5 };
+  if (type === "serpent"){ e.hp = 6; e.dmg = 20; e.speed = 1.3; }
+  enemies.push(e);
 }
-function ellensegSpriteKep(e){
-  if (e.tipus === "hullo") return IMG.hullo;
+function enemyImage(e){
+  if (e.type === "serpent") return IMG.hullo;
   return e.ghoul ? IMG.fertozett_ferfi : IMG.fertozett_no;
 }
-function ellensegSzin(e){
-  if (e.tipus === "hullo") return "#2a5";    // hüllő zöld
-  return e.ghoul ? "#8a8" : "#9c9";          // fertőzett világosabb
+function enemyColor(e){
+  return e.type === "serpent" ? "#2a5" : (e.ghoul ? "#8a8" : "#9c9");
 }
 
-function palya1(){
-  ellensegek = [];
-  spawnEllenseg("fertozott", 5, 5);
-  spawnEllenseg("fertozett", 12, 7);
-  spawnEllenseg("fertozett", 3, 7);
-  spawnEllenseg("hullo",     13, 3);
-  spawnEllenseg("hullo",     7, 9);
-  player = { x: 1.5*TS, y: 1.5*TS, a: 0, hp: 100, seb: 0 };
-  uzen("Simon: 'Zack, a szobornál találkozunk! Vigyázz, nem vagy egyedül...'", 5000);
+function startLevel1(){
+  enemies = [];
+  spawnEnemy("infected", 5, 5);
+  spawnEnemy("infected", 12, 7);
+  spawnEnemy("infected", 3, 7);
+  spawnEnemy("serpent", 13, 3);
+  spawnEnemy("serpent", 7, 9);
+  player = { x:1.5*TS, y:1.5*TS, a:0, hp:100 };
+  showMsg("Simon: 'Zack, meet me at the statue! Careful... you are not alone...'", 5000);
 }
 
-// ==================== BEVITEL ====================
+// ==================== INPUT ====================
 addEventListener("keydown", e => {
   keys[e.code] = true;
-  if (e.code === "Space"){ tamadas(); e.preventDefault(); }
-  if (state === "menu" && (e.code === "Enter" || e.code === "Space")) palya1(), state = "jatek";
-  if (state === "halal" && e.code === "Enter") state = "menu";
-  if (state === "gyozelem" && e.code === "Enter") state = "menu";
+  if (e.code === "Space"){ attack(); e.preventDefault(); }
+  if (state === "title" && e.code === "Enter"){ state = "menu"; }
+  else if (state === "menu" && e.code === "Enter"){ startLevel1(); state = "game"; }
+  else if ((state === "death" || state === "victory") && e.code === "Enter") state = "menu";
 });
 addEventListener("keyup", e => keys[e.code] = false);
 
-function tamadas(){
-  if (state !== "jatek" || attackCd > 0) return;
-  attackCd = 500; // fél mp
-  // zöld fény-kitörés: közeli ellenség sebzése
-  for (const e of ellensegek){
+// ==================== ATTACK ====================
+function attack(){
+  if (state !== "game" || attackCd > 0) return;
+  attackCd = 500;
+  for (const e of enemies){
     const d = Math.hypot(e.x-player.x, e.y-player.y);
     if (d < TS*1.2){
-      // szög-ellenőrzés: előttünk van-e
       const ang = Math.atan2(e.y-player.y, e.x-player.x);
       let diff = ang - player.a;
       while (diff > Math.PI) diff -= 2*Math.PI;
       while (diff < -Math.PI) diff += 2*Math.PI;
       if (Math.abs(diff) < 0.7){
         e.hp -= 2;
-        uzen("A zöld fény villan! 👁️", 900);
-        if (e.hp <= 0) e.halott = true;
+        showMsg("The green light flashes! 👁️", 900);
+        if (e.hp <= 0) e.dead = true;
       }
     }
   }
-  ellensegek = ellensegek.filter(e => !e.halott);
-  if (ellensegek.length === 0){
-    state = "gyozelem";
-  }
+  enemies = enemies.filter(e => !e.dead);
+  if (enemies.length === 0) state = "victory";
 }
 
-// ==================== FAL-AJÁNLÓ (ütközés) ====================
+// ==================== COLLISION ====================
 function tileAt(x,y){
   const tx = Math.floor(x/TS), ty = Math.floor(y/TS);
   if (tx<0||ty<0||tx>=MW||ty>=MH) return 1;
   return MAPS[ty][tx];
 }
-function atjaro(x,y){
-  // kis biztonsági sáv
+function isWalkable(x,y){
   const r = 10;
   return !tileAt(x-r,y-r) && !tileAt(x+r,y-r) && !tileAt(x-r,y+r) && !tileAt(x+r,y+r);
 }
 
-// ==================== RAYCASTER ====================
+// ==================== RAYCAST ====================
 function castRay(ang){
-  // DDA lépésekenként
-  const step = 2;
+  const step = 2, dx = Math.cos(ang), dy = Math.sin(ang);
   let d = 0;
-  const dx = Math.cos(ang), dy = Math.sin(ang);
   while (d < 20*TS){
     d += step;
-    if (tileAt(player.x+dx*d, player.y+dy*d)) return d - step;
+    if (tileAt(player.x+dx*d, player.y+dy*d))
+      return { d: d-step, hx: player.x+dx*d, hy: player.y+dy*d };
   }
-  return 20*TS;
+  return { d: 20*TS, hx: player.x, hy: player.y };
+}
+continue
+// ==================== TITLE SCREEN ====================
+function drawTitle(){
+  if (imgOK(IMG.fedlap)){
+    const im = IMG.fedlap;
+    const ar = im.naturalWidth / im.naturalHeight;
+    let w = canvas.width, h = w/ar;
+    if (h < canvas.height){ h = canvas.height; w = h*ar; }
+    ctx.drawImage(im, (canvas.width-w)/2, (canvas.height-h)/2, w, h);
+    ctx.fillStyle = "rgba(0,8,3,0.35)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = "#010402"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (imgOK(IMG.kigyo_szobor)){
+      ctx.globalAlpha = 0.35;
+      ctx.drawImage(IMG.kigyo_szobor, canvas.width/2-220, 30, 440, 440);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#1f4"; ctx.font = "bold 15px monospace";
+  ctx.fillText("A Zack Adventure 🐍", canvas.width/2, 70);
+
+  ctx.shadowColor = "#0f4"; ctx.shadowBlur = 25;
+  ctx.fillStyle = "#4f8"; ctx.font = "bold 52px monospace";
+  ctx.fillText("👁 GREEN EYE 👁", canvas.width/2, 150);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "#7c6"; ctx.font = "italic 19px monospace";
+  ctx.fillText("The Serpent God is the Master of Your Fate", canvas.width/2, 192);
+
+  ctx.fillStyle = "#adf5c0"; ctx.font = "14px monospace";
+  ctx.fillText("The infection has spread. The only hope lies in the", canvas.width/2, 380);
+  ctx.fillText("guarded power of the ancient Serpent Statue...", canvas.width/2, 402);
+
+  if (Math.floor(performance.now()/600) % 2 === 0){
+    ctx.fillStyle = "#5f5"; ctx.font = "bold 18px monospace";
+    ctx.fillText("[ Press ENTER to continue ]", canvas.width/2, 460);
+  }
+  ctx.textAlign = "left";
 }
 
-function rajzol3D(){
-  const FOV = Math.PI/3;
-  const N = 200; // sugárszám
+// ==================== 3D VIEW ====================
+function draw3D(){
+  const FOV = Math.PI/3, N = 200, W = canvas.width, H = canvas.height;
+
+  // Sky
+  ctx.fillStyle = "#041207"; ctx.fillRect(0, 0, W, H/2);
+
+  // Floor
+  if (imgOK(IMG.padlo)){
+    ctx.drawImage(IMG.padlo, 0, H/2, W, H/2);
+    ctx.fillStyle = "rgba(0,20,5,0.55)"; ctx.fillRect(0, H/2, W, H/2);
+  } else {
+    ctx.fillStyle = "#0a1a0d"; ctx.fillRect(0, H/2, W, H/2);
+  }
+
+  // Walls
+  const wallImg = imgOK(IMG.fal) ? IMG.fal : null;
   for (let i=0;i<N;i++){
     const ang = player.a - FOV/2 + FOV*(i/N);
-    const d = castRay(ang);
-    const corr = Math.max(0.1, d*Math.cos(ang-player.a)); // hordó-torzítás javítása
-    const h = Math.min(canvas.height, (TS*300)/corr);
-    // zöldes árnyalás távolság szerint
-    const br = Math.max(0, 1 - d/(14*TS));
-    ctx.fillStyle = `rgb(Math.floor(20+50∗br),{Math.floor(20+50*br)},Math.floor(20+50∗br),{Math.floor(40+110*br)},${Math.floor(25+60*br)})`;
-    ctx.fillRect(i*(canvas.width/N), (canvas.height-h)/2, canvas.width/N+1, h);
+    const r = castRay(ang);
+    const corr = Math.max(0.1, r.d*Math.cos(ang-player.a));
+    const h = Math.min(H, (TS*300)/corr);
+    const y0 = (H-h)/2, sx = i*(W/N);
+
+    if (wallImg){
+      let u;
+      const fx = r.hx % TS, fy = r.hy % TS;
+      if (fx < 3 || fx > TS-3) u = fy/TS; else u = fx/TS;
+      const tw = Math.max(1, Math.floor(wallImg.width/N*2));
+      const tx = Math.min(wallImg.width-tw, Math.floor(u*(wallImg.width-tw)));
+      ctx.drawImage(wallImg, tx, 0, tw, wallImg.height, sx, y0, W/N+1, h);
+      const br = Math.max(0, 1 - r.d/(14*TS));
+      ctx.fillStyle = `rgba(0,10,3,${1-br})`;
+      ctx.fillRect(sx, y0, W/N+1, h);
+    } else {
+      const br = Math.max(0, 1 - r.d/(14*TS));
+      ctx.fillStyle = `rgb(20+50∗br∣0,{20+50*br|0},20+50∗br∣0,{40+110*br|0},${25+60*br|0})`;
+      ctx.fillRect(sx, y0, W/N+1, h);
+    }
   }
-  // köd
-  ctx.fillStyle = "rgba(0,25,8,0.25)";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Sprites (far first)
+  const sprites = enemies.map(e => ({ x:e.x, y:e.y, e:e }));
+  sprites.push({ x:4.5*TS, y:9.5*TS, e:{ type:"statue" } });
+  sprites.sort((a,b) =>
+    Math.hypot(b.x-player.x, b.y-player.y) - Math.hypot(a.x-player.x, a.y-player.y));
+  for (const s of sprites){
+    if (s.e.type === "statue") drawSprite(s.x, s.y, IMG.kigyo_szobor, "#575");
+    else drawSprite(s.x, s.y, enemyImage(s.e), enemyColor(s.e));
+  }
 }
 
-// ==================== SPRITE-RAJZOLÁS 3D-BEN ====================
-function rajzolSprite(x, y, kep, tartalekSzin, hMul=1, fillStyleExtra=""){
+function drawSprite(x, y, img, fallbackColor){
   const dx = x - player.x, dy = y - player.y;
-  const d = Math.hypot(dx,dy);
+  const d = Math.hypot(dx, dy);
   if (d < 5) return;
-  let ang = Math.atan2(dy,dx) - player.a;
+  let ang = Math.atan2(dy, dx) - player.a;
   while (ang > Math.PI) ang -= 2*Math.PI;
   while (ang < -Math.PI) ang += 2*Math.PI;
-  if (Math.abs(ang) > Math.PI/2.2) return; // mögöttünk
+  if (Math.abs(ang) > Math.PI/2.2) return;
   const FOV = Math.PI/3;
   const sx = (0.5 + ang/FOV) * canvas.width;
   const h = Math.min(canvas.height*0.95, (TS*300)/(d*Math.cos(ang)));
-  const w = h;
-  const sy = (canvas.height - h)/2;
-  // egyszerű takarás: közelebbi fal nem takarja itt (simple)
-  if (imgOK(kep)){
-    ctx.drawImage(kep, sx-w/2, sy, w, h);
+  const w = h, sy = (canvas.height - h)/2;
+  if (imgOK(img)){
+    ctx.drawImage(img, sx-w/2, sy, w, h);
   } else {
-    // tartalék: sziluett + izzó szemek
-    ctx.fillStyle = tartalekSzin;
+    ctx.fillStyle = fallbackColor;
     ctx.fillRect(sx-w/4, sy+h*0.25, w/2, h*0.75);
     ctx.beginPath(); ctx.arc(sx, sy+h*0.18, w/6, 0, 7); ctx.fill();
     ctx.fillStyle = "#0f0";
-    ctx.fillRect(sx-w/9, sy+h*0.14, w/12, h/
+    ctx.fillRect(sx-w/9, sy+h*0.14, w/12, h/20);
+    ctx.fillRect(sx+w/36, sy+h*0.14, w/12, h/20);
+  }
+}
 
-> ⚠️ The response reached the length limit. Reply **continue** to get the rest.
+// ==================== HUD ====================
+function drawHUD(){
+  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(10, 10, 220, 30);
+  ctx.fillStyle = "#400"; ctx.fillRect(15, 15, 210, 20);
+  ctx.fillStyle = "#0a0"; ctx.fillRect(15, 15, 210*Math.max(0,player.hp)/100, 20);
+  ctx.fillStyle = "#cfc"; ctx.font = "14px monospace";
+  ctx.fillText("Zack  ❤ " + Math.max(0, Math.ceil(player.hp)), 20, 30);
+
+  if (performance.now() < messageTime){
+    ctx.fillStyle = "rgba(0,15,5,0.85)";
+    ctx.fillRect(0, canvas.height-60, canvas.width, 50);
+    ctx.fillStyle = "#9f9"; ctx.font = "15px monospace";
+    ctx.fillText(message, 15, canvas.height-30);
+  }
+  // Crosshair
+  ctx.fillStyle = "#5f5";
+  ctx.fillRect(canvas.width/2-1, canvas.height/2-8, 2, 6);
+  ctx.fillRect(canvas.width/2-1, canvas.height/2+2, 2, 6);
+}
+
+// ==================== MENU & END SCREENS ====================
+function drawMenu(){
+  ctx.fillStyle = "#020603"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (imgOK(IMG.fedlap)){
+    ctx.globalAlpha = 0.2;
+    ctx.drawImage(IMG.fedlap, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1;
+  } else if (imgOK(IMG.kigyo_szobor)){
+    ctx.globalAlpha = 0.25;
+    ctx.drawImage(IMG.kigyo_szobor, canvas.width/2-200, 20, 400, 400);
+    ctx.globalAlpha = 1;
+  }
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#3f6"; ctx.font = "bold 44px monospace";
+  ctx.fillText("👁 GREEN EYE 👁", canvas.width/2, 180);
+  ctx.fillStyle = "#7c6"; ctx.font = "18px monospace";
+  ctx.fillText("The Serpent God is the Master of Your Fate", canvas.width/2, 215);
+  ctx.fillStyle = "#9c9"; ctx.font = "15px monospace";
+  ctx.fillText("WASD / arrows: move   |   ← →: turn", canvas.width/2, 290);
+  ctx.fillText("SPACE: attack   |   E: interact", canvas.width/2, 315);
+  if (Math.floor(performance.now()/500) % 2 === 0){
+    ctx.fillStyle = "#5f5"; ctx.font = "bold 20px monospace";
+    ctx.fillText("— Press ENTER to start —", canvas.width/2, 400);
+  }
+  ctx.textAlign = "left";
+}
+
+function drawEnd(victory){
+  ctx.fillStyle = victory ? "rgba(0,30,10,0.9)" : "rgba(30,0,0,0.9)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.textAlign = "center";
+  ctx.fillStyle = victory ? "#5f5" : "#f55";
+  ctx.font = "bold 40px monospace";
+  ctx.fillText(victory ? "🏆 VICTORY! 🏆" : "💀 YOU ARE LOST... 💀", canvas.width/2, 220);
+  ctx.fillStyle = "#9c9"; ctx.font = "16px monospace";
+  ctx.fillText(victory ? "The Eye of the Serpent is yours! 👁️"
+                       : "The Serpent God is the Master of Your Fate...",
+               canvas.width/2, 270);
+  ctx.fillText("Press ENTER for menu", canvas.width/2, 330);
+  ctx.textAlign = "left";
+}
+
+// ==================== UPDATE ====================
+function update(dt){
+  const speed = 120 * dt / 1000;
+  let turn = 0, fwd = 0, side = 0;
+  if (keys["ArrowLeft"]) turn -= 1;
+  if (keys["ArrowRight"]) turn += 1;
+  if (keys["KeyW"] || keys["ArrowUp"]) fwd = 1;
+  if (keys["KeyS"] || keys["ArrowDown"]) fwd = -1;
+  if (keys["KeyA"]) side = -1;
+  if (keys["KeyD"]) side = 1;
+
+  player.a += turn * 2.2 * dt / 1000;
+  const dx = Math.cos(player.a), dy = Math.sin(player.a);
+  let nx = player.x + (dx*fwd + dy*-side) * speed;
+  let ny = player.y + (dy*fwd + dx*side) * speed;
+  if (isWalkable(nx, player.y)) player.x = nx;
+  if (isWalkable(player.x, ny)) player.y = ny;
+
+  for (const e of enemies){
+    const d = Math.hypot(e.x-player.x, e.y-player.y);
+    if (d > TS*0.7 && d < TS*8){
+      const ex = (player.x-e.x)/d, ey = (player.y-e.y)/d;
+      const nex = e.x + ex*e.speed*speed;
+      const ney = e.y + ey*e.speed*speed;
+      if (isWalkable(nex, e.y)) e.x = nex;
+      if (isWalkable(e.x, ney)) e.y = ney;
+    }
+    if (d < TS*0.8){
+      player.hp -= e.dmg * dt / 1000;
+      if (player.hp <= 0){ player.hp = 0; state = "death"; }
+    }
+  }
+
+  if (attackCd > 0) attackCd -= dt;
+}
+
+// ==================== MAIN LOOP ====================
+continue
+  // ==================== MAIN LOOP ====================
+let lastT = performance.now();
+function loop(t){
+  const dt = Math.min(50, t - lastT); lastT = t;
+
+  if (state === "game") update(dt);
+
+  if (state === "title") drawTitle();
+  else if (state === "menu") drawMenu();
+  else if (state === "game"){ draw3D(); drawHUD(); }
+  else if (state === "death"){ draw3D(); drawEnd(false); }
+  else if (state === "victory"){ draw3D(); drawEnd(true); }
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ==================== INTERACTION (E) ====================
+addEventListener("keydown", e => {
+  if (e.code === "KeyE" && state === "game"){
+    const statueX = 4.5*TS, statueY = 9.5*TS;
+    const d = Math.hypot(player.x-statueX, player.y-statueY);
+    if (d < TS*2){
+      showMsg("👁️ The Eye of the Serpent stares back... It is the master of your fate! 🐍", 4000);
+    } else {
+      showMsg("Simon (from afar): 'Head to the statue! Follow the corridor!'", 3000);
+    }
+  }
+});
+</script>
+</body>
+</html>
+
