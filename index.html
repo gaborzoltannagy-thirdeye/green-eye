@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<title>Zöld Szem – A Kígyó Istensége</title>
+<style>
+  body { margin:0; background:#000; color:#8f8; font-family:monospace;
+         display:flex; flex-direction:column; align-items:center; }
+  canvas { image-rendering:pixelated; border:2px solid #243; margin-top:10px; }
+  #info { color:#5a6; font-size:13px; margin:6px; text-align:center; }
+  h1 { color:#7c6; text-shadow:0 0 10px #1f4; margin:10px; }
+</style>
+</head>
+<body>
+<h1>👁️ ZÖLD SZEM – A Kígyó Istensége 🐍</h1>
+<canvas id="c" width="800" height="500"></canvas>
+<div id="info">WASD / nyilak: mozgás &nbsp;|&nbsp; Egér vagy ← →: fordulás &nbsp;|&nbsp; SPACE: támadás &nbsp;|&nbsp; E: interakció</div>
+
+<script>
+// ==================== KÉPEK BETÖLTÉSE ====================
+// Ha egy kép nincs meg, a rajzolóhelyettesítőt használjuk.
+const IMG = {};
+const IMGDEFS = {
+  zack:      "img/zack.png",
+  fertozett_ferfi: "img/fertozett_ferfi.png",
+  fertozett_no:    "img/fertozett_no.png",
+  hullo:     "img/hullo.png",
+  kigyo_szobor: "img/kigyo_szobor.png"
+};
+for (const k in IMGDEFS) {
+  const im = new Image();
+  im.src = IMGDEFS[k];
+  IMG[k] = im; // ha nem töltődik be, a drawAsset() rajzol helyette
+}
+function imgOK(im){ return im.complete && im.naturalWidth > 0; }
+
+// ==================== TÉRKÉP ====================
+// 1=fal, 0=üres, S=szobor helye (2-es kód)
+const MAPS = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,0,1,0,1,1,1,1,1,1,1,0,1],
+  [1,0,1,0,0,0,0,0,0,0,0,1,0,0,0,1],
+  [1,0,1,0,1,1,1,1,1,1,0,1,0,1,1,1],
+  [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1],
+  [1,0,1,1,1,1,1,1,1,1,1,1,0,1,0,1],
+  [1,0,0,0,2,0,0,0,0,0,0,1,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
+const MW = 16, MH = 11, TS = 64; // tile méret
+
+// ==================== JÁTÉKÁLLAPOT ====================
+let state = "menu"; // menu | jatek | halal | gyozelem
+let player = { x: 1.5*TS, y: 1.5*TS, a: 0, hp: 100, seb: 0 };
+let ellensegek = [];
+let uzenet = "";
+let uzenetIdo = 0;
+let keys = {};
+let attackCd = 0;
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+function uzen(ki, ms=2500){ uzenet = ki; uzenetIdo = performance.now()+ms; }
+
+// ==================== ELLENSÉGEK ====================
+function spawnEllenseg(tipus, tx, ty){
+  const e = { tipus, x: tx*TS+TS/2, y: ty*TS+TS/2, hp: 3, seb: 10, speed: 0.8, ghoul: Math.random()<0.5 };
+  if (tipus === "hullo"){ e.hp = 6; e.seb = 20; e.speed = 1.3; }
+  ellensegek.push(e);
+}
+function ellensegSpriteKep(e){
+  if (e.tipus === "hullo") return IMG.hullo;
+  return e.ghoul ? IMG.fertozett_ferfi : IMG.fertozett_no;
+}
+function ellensegSzin(e){
+  if (e.tipus === "hullo") return "#2a5";    // hüllő zöld
+  return e.ghoul ? "#8a8" : "#9c9";          // fertőzett világosabb
+}
+
+function palya1(){
+  ellensegek = [];
+  spawnEllenseg("fertozott", 5, 5);
+  spawnEllenseg("fertozett", 12, 7);
+  spawnEllenseg("fertozett", 3, 7);
+  spawnEllenseg("hullo",     13, 3);
+  spawnEllenseg("hullo",     7, 9);
+  player = { x: 1.5*TS, y: 1.5*TS, a: 0, hp: 100, seb: 0 };
+  uzen("Simon: 'Zack, a szobornál találkozunk! Vigyázz, nem vagy egyedül...'", 5000);
+}
+
+// ==================== BEVITEL ====================
+addEventListener("keydown", e => {
+  keys[e.code] = true;
+  if (e.code === "Space"){ tamadas(); e.preventDefault(); }
+  if (state === "menu" && (e.code === "Enter" || e.code === "Space")) palya1(), state = "jatek";
+  if (state === "halal" && e.code === "Enter") state = "menu";
+  if (state === "gyozelem" && e.code === "Enter") state = "menu";
+});
+addEventListener("keyup", e => keys[e.code] = false);
+
+function tamadas(){
+  if (state !== "jatek" || attackCd > 0) return;
+  attackCd = 500; // fél mp
+  // zöld fény-kitörés: közeli ellenség sebzése
+  for (const e of ellensegek){
+    const d = Math.hypot(e.x-player.x, e.y-player.y);
+    if (d < TS*1.2){
+      // szög-ellenőrzés: előttünk van-e
+      const ang = Math.atan2(e.y-player.y, e.x-player.x);
+      let diff = ang - player.a;
+      while (diff > Math.PI) diff -= 2*Math.PI;
+      while (diff < -Math.PI) diff += 2*Math.PI;
+      if (Math.abs(diff) < 0.7){
+        e.hp -= 2;
+        uzen("A zöld fény villan! 👁️", 900);
+        if (e.hp <= 0) e.halott = true;
+      }
+    }
+  }
+  ellensegek = ellensegek.filter(e => !e.halott);
+  if (ellensegek.length === 0){
+    state = "gyozelem";
+  }
+}
+
+// ==================== FAL-AJÁNLÓ (ütközés) ====================
+function tileAt(x,y){
+  const tx = Math.floor(x/TS), ty = Math.floor(y/TS);
+  if (tx<0||ty<0||tx>=MW||ty>=MH) return 1;
+  return MAPS[ty][tx];
+}
+function atjaro(x,y){
+  // kis biztonsági sáv
+  const r = 10;
+  return !tileAt(x-r,y-r) && !tileAt(x+r,y-r) && !tileAt(x-r,y+r) && !tileAt(x+r,y+r);
+}
+
+// ==================== RAYCASTER ====================
+function castRay(ang){
+  // DDA lépésekenként
+  const step = 2;
+  let d = 0;
+  const dx = Math.cos(ang), dy = Math.sin(ang);
+  while (d < 20*TS){
+    d += step;
+    if (tileAt(player.x+dx*d, player.y+dy*d)) return d - step;
+  }
+  return 20*TS;
+}
+
+function rajzol3D(){
+  const FOV = Math.PI/3;
+  const N = 200; // sugárszám
+  for (let i=0;i<N;i++){
+    const ang = player.a - FOV/2 + FOV*(i/N);
+    const d = castRay(ang);
+    const corr = Math.max(0.1, d*Math.cos(ang-player.a)); // hordó-torzítás javítása
+    const h = Math.min(canvas.height, (TS*300)/corr);
+    // zöldes árnyalás távolság szerint
+    const br = Math.max(0, 1 - d/(14*TS));
+    ctx.fillStyle = `rgb(Math.floor(20+50∗br),{Math.floor(20+50*br)},Math.floor(20+50∗br),{Math.floor(40+110*br)},${Math.floor(25+60*br)})`;
+    ctx.fillRect(i*(canvas.width/N), (canvas.height-h)/2, canvas.width/N+1, h);
+  }
+  // köd
+  ctx.fillStyle = "rgba(0,25,8,0.25)";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+
+// ==================== SPRITE-RAJZOLÁS 3D-BEN ====================
+function rajzolSprite(x, y, kep, tartalekSzin, hMul=1, fillStyleExtra=""){
+  const dx = x - player.x, dy = y - player.y;
+  const d = Math.hypot(dx,dy);
+  if (d < 5) return;
+  let ang = Math.atan2(dy,dx) - player.a;
+  while (ang > Math.PI) ang -= 2*Math.PI;
+  while (ang < -Math.PI) ang += 2*Math.PI;
+  if (Math.abs(ang) > Math.PI/2.2) return; // mögöttünk
+  const FOV = Math.PI/3;
+  const sx = (0.5 + ang/FOV) * canvas.width;
+  const h = Math.min(canvas.height*0.95, (TS*300)/(d*Math.cos(ang)));
+  const w = h;
+  const sy = (canvas.height - h)/2;
+  // egyszerű takarás: közelebbi fal nem takarja itt (simple)
+  if (imgOK(kep)){
+    ctx.drawImage(kep, sx-w/2, sy, w, h);
+  } else {
+    // tartalék: sziluett + izzó szemek
+    ctx.fillStyle = tartalekSzin;
+    ctx.fillRect(sx-w/4, sy+h*0.25, w/2, h*0.75);
+    ctx.beginPath(); ctx.arc(sx, sy+h*0.18, w/6, 0, 7); ctx.fill();
+    ctx.fillStyle = "#0f0";
+    ctx.fillRect(sx-w/9, sy+h*0.14, w/12, h/
+
+> ⚠️ The response reached the length limit. Reply **continue** to get the rest.
