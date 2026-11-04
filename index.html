@@ -225,8 +225,150 @@ function draw3D(){
   const sprites = enemies.map(e => ({ x:e.x, y:e.y, e:e }));
   sprites.push({ x:4.5*TS, y:9.5*TS, e:{ type:"statue" } });
   sprites.sort((a,b) =>
-    Math.hypot(b.x
+   Math.hypot(b.x-player.x, b.y-player.y) - Math.hypot(a.x-player.x, a.y-player.y));
+  for (const s of sprites){
+    if (s.e.type === "statue") drawSprite(s.x, s.y, IMG.kigyo_szobor, "#575");
+    else drawSprite(s.x, s.y, enemyImage(s.e), enemyColor(s.e));
+  }
+  // fog
+  ctx.fillStyle = "rgba(0,25,8,0.25)";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+}
 
-> ⚠️ The response reached the length limit. Reply **continue** to get the rest.
+// ==================== SPRITE DRAWING (3D) ====================
+function drawSprite(x, y, img, fallbackColor){
+  const dx = x - player.x, dy = y - player.y;
+  const d = Math.hypot(dx, dy);
+  if (d < 5) return;
+  let ang = Math.atan2(dy, dx) - player.a;
+  while (ang > Math.PI) ang -= 2*Math.PI;
+  while (ang < -Math.PI) ang += 2*Math.PI;
+  if (Math.abs(ang) > Math.PI/2.2) return;
+  const FOV = Math.PI/3;
+  const sx = (0.5 + ang/FOV) * canvas.width;
+  const h = Math.min(canvas.height*0.95, (TS*300)/(d*Math.cos(ang)));
+  const w = h, sy = (canvas.height - h)/2;
+  if (imgOK(img)){
+    ctx.drawImage(img, sx-w/2, sy, w, h);
+  } else {
+    // fallback: silhouette + glowing eyes
+    ctx.fillStyle = fallbackColor;
+    ctx.fillRect(sx-w/4, sy+h*0.25, w/2, h*0.75);
+    ctx.beginPath(); ctx.arc(sx, sy+h*0.18, w/6, 0, 7); ctx.fill();
+    ctx.fillStyle = "#0f0";
+    ctx.fillRect(sx-w/9, sy+h*0.14, w/12, h/20);
+    ctx.fillRect(sx+w/36, sy+h*0.14, w/12, h/20);
+  }
+}
 
+// ==================== HUD ====================
+function drawHUD(){
+  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(10, 10, 220, 30);
+  ctx.fillStyle = "#400"; ctx.fillRect(15, 15, 210, 20);
+  ctx.fillStyle = "#0a0"; ctx.fillRect(15, 15, 210*Math.max(0,player.hp)/100, 20);
+  ctx.fillStyle = "#cfc"; ctx.font = "14px monospace";
+  ctx.fillText("Zack  ❤ " + Math.max(0, Math.ceil(player.hp)), 20, 30);
+  if (performance.now() < messageTime){
+    ctx.fillStyle = "rgba(0,15,5,0.85)";
+    ctx.fillRect(0, canvas.height-60, canvas.width, 50);
+    ctx.fillStyle = "#9f9"; ctx.font = "15px monospace";
+    ctx.fillText(message, 15, canvas.height-30);
+  }
+  // Crosshair
+  ctx.fillStyle = "#5f5";
+  ctx.fillRect(canvas.width/2-1, canvas.height/2-8, 2, 6);
+  ctx.fillRect(canvas.width/2-1, canvas.height/2+2, 2, 6);
+}
+
+// ==================== MENU & END SCREENS ====================
+function drawMenu(){
+  ctx.fillStyle = "#020603"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (imgOK(IMG.fedlap)){
+    ctx.globalAlpha = 0.2;
+    ctx.drawImage(IMG.fedlap, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1;
+  } else if (imgOK(IMG.kigyo_szobor)){
+    ctx.globalAlpha = 0.25;
+    ctx.drawImage(IMG.kigyo_szobor, canvas.width/2-200, 20, 400, 400);
+    ctx.globalAlpha = 1;
+  }
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#3f6"; ctx.font = "bold 44px monospace";
+  ctx.fillText("👁 GREEN EYE 👁", canvas.width/2, 180);
+  ctx.fillStyle = "#7c6"; ctx.font = "18px monospace";
+  ctx.fillText("The Serpent God is the Master of Your Fate", canvas.width/2, 215);
+  ctx.fillStyle = "#9c9"; ctx.font = "15px monospace";
+  ctx.fillText("WASD / arrows: move   |   ← →: turn", canvas.width/2, 290);
+  ctx.fillText("SPACE: attack   |   E: interact", canvas.width/2, 315);
+  if (Math.floor(performance.now()/500) % 2 === 0){
+    ctx.fillStyle = "#5f5"; ctx.font = "bold 20px monospace";
+    ctx.fillText("— Press ENTER to start —", canvas.width/2, 400);
+  }
+  ctx.textAlign = "left";
+}
+
+function drawEnd(victory){
+  ctx.fillStyle = victory ? "rgba(0,30,10,0.9)" : "rgba(30,0,0,0.9)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.textAlign = "center";
+  ctx.fillStyle = victory ? "#5f5" : "#f55";
+  ctx.font = "bold 40px monospace";
+  ctx.fillText(victory ? "🏆 VICTORY! 🏆" : "💀 YOU ARE LOST... 💀", canvas.width/2, 220);
+  ctx.fillStyle = "#9c9"; ctx.font = "16px monospace";
+  ctx.fillText(victory ? "The Eye of the Serpent is yours! 👁️"
+                       : "The Serpent God is the Master of Your Fate...",
+               canvas.width/2, 270);
+  ctx.fillText("Press ENTER for menu", canvas.width/2, 330);
+  ctx.textAlign = "left";
+}
+
+// ==================== UPDATE ====================
+function update(dt){
+  const speed = 120 * dt / 1000;
+  let turn = 0, fwd = 0, side = 0;
+  if (keys["ArrowLeft"]) turn -= 1;
+  if (keys["ArrowRight"]) turn += 1;
+  if (keys["KeyW"] || keys["ArrowUp"]) fwd = 1;
+  if (keys["KeyS"] || keys["ArrowDown"]) fwd = -1;
+  if (keys["KeyA"]) side = -1;
+  if (keys["KeyD"]) side = 1;
+  player.a += turn * 2.2 * dt / 1000;
+  const dx = Math.cos(player.a), dy = Math.sin(player.a);
+  let nx = player.x + (dx*fwd + dy*-side) * speed;
+  let ny = player.y + (dy*fwd + dx*side) * speed;
+  if (isWalkable(nx, player.y)) player.x = nx;
+  if (isWalkable(player.x, ny)) player.y = ny;
+  for (const e of enemies){
+    const d = Math.hypot(e.x-player.x, e.y-player.y);
+    if (d > TS*0.7 && d < TS*8){
+      const ex = (player.x-e.x)/d, ey = (player.y-e.y)/d;
+      const nex = e.x + ex*e.speed*speed;
+      const ney = e.y + ey*e.speed*speed;
+      if (isWalkable(nex, e.y)) e.x = nex;
+      if (isWalkable(e.x, ney)) e.y = ney;
+    }
+    if (d < TS*0.8){
+      player.hp -= e.dmg * dt / 1000;
+      if (player.hp <= 0){ player.hp = 0; state = "death"; }
+    }
+  }
+  if (attackCd > 0) attackCd -= dt;
+}
+
+// ==================== MAIN LOOP ====================
+let lastT = performance.now();
+function loop(t){
+  const dt = Math.min(50, t - lastT); lastT = t;
+  if (state === "game") update(dt);
+  if (state === "title") drawTitle();
+  else if (state === "menu") drawMenu();
+  else if (state === "game"){ draw3D(); drawHUD(); }
+  else if (state === "death"){ draw3D(); drawEnd(false); }
+  else if (state === "victory"){ draw3D(); drawEnd(true); }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
 
